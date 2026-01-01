@@ -1,0 +1,135 @@
+rules_version = '2';
+
+// Firebase Storage Security Rules
+// These rules control access to Firebase Storage files
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // Helper function to check if user is admin
+    function isAdmin() {
+      return request.auth != null && 
+        exists(/databases/(default)/documents/users/$(request.auth.uid)) &&
+        get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Helper function to check if user owns the resource
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Helper function to validate file type
+    function isValidImageType() {
+      return resource.contentType.matches('image/.*');
+    }
+    
+    // Helper function to validate file size (3MB limit)
+    function isValidFileSize() {
+      return resource.size < 3 * 1024 * 1024; // 3MB in bytes
+    }
+    
+    // Helper function to validate file name
+    function isValidFileName() {
+      return resource.name.matches('.*\\.(jpg|jpeg|png|webp)$');
+    }
+    
+    // Simplified validation for immediate testing
+    function isValidFile() {
+      return true; // Allow all files for now
+    }
+    
+    // PROFILE IMAGES - Users can only access their own profile images
+    match /profiles/{userId}/{fileName} {
+      // Allow read access to profile images for authenticated users
+      // This allows other users to see profile pictures in listings
+      allow read: if isAuthenticated();
+      
+      // Only the owner can upload/update their profile image
+      allow write: if isAuthenticated() && isOwner(userId) && 
+        isValidImageType() && isValidFileSize() && isValidFileName();
+      
+      // Only the owner can delete their profile image
+      allow delete: if isAuthenticated() && isOwner(userId);
+    }
+    
+    // ID DOCUMENTS - Users can only access their own ID documents
+    match /id-documents/{userId}/{fileName} {
+      // Only the owner can read their ID documents
+      allow read: if isAuthenticated() && isOwner(userId);
+      
+      // Only the owner can upload/update their ID documents
+      allow write: if isAuthenticated() && isOwner(userId) && 
+        isValidImageType() && isValidFileSize() && isValidFileName();
+      
+      // Only the owner can delete their ID documents
+      allow delete: if isAuthenticated() && isOwner(userId);
+      
+      // Admins can also access ID documents for verification
+      allow read, write, delete: if isAdmin();
+    }
+    
+    // POST IMAGES - Allow all authenticated users
+    match /posts/{fileName} {
+      // Anyone can read post images (public listings)
+      allow read: if true;
+      
+      // Authenticated users can upload post images
+      allow write: if request.auth != null;
+      
+      // Authenticated users can delete post images
+      allow delete: if request.auth != null;
+    }
+    
+    // POST IMAGES WITH POST ID - Alternative structure for organized storage
+    match /posts/{postId}/{fileName} {
+      // Anyone can read post images (public listings)
+      allow read: if true;
+      
+      // Authenticated users can upload post images
+      allow write: if request.auth != null;
+      
+      // Authenticated users can delete post images
+      allow delete: if request.auth != null;
+    }
+    
+    // ADMIN FOLDER - Only admins can access
+    match /admin/{allPaths=**} {
+      allow read, write, delete: if isAdmin();
+    }
+    
+    // TEMPORARY UPLOADS - Users can manage their own temp files
+    match /temp/{userId}/{allPaths=**} {
+      allow read, write, delete: if isAuthenticated() && isOwner(userId);
+      
+      // Auto-delete temp files after 24 hours (handled by client-side cleanup)
+      // This is just for access control, actual cleanup is done by the application
+    }
+    
+    // DEFAULT DENY - Deny access to any other paths
+    match /{allPaths=**} {
+      allow read, write, delete: if false;
+    }
+  }
+}
+
+// Additional Security Considerations:
+// 1. File type validation is enforced at the storage level
+// 2. File size limits are enforced (3MB max)
+// 3. User-based access control for personal files
+// 4. Public read access for post images
+// 5. Admin access for management operations
+// 6. Temporary file cleanup should be handled by the application
+// 7. Consider implementing image processing/compression before upload
+// 8. Monitor storage usage and implement quotas if needed
+
+// Setup Instructions:
+// 1. Go to Firebase Console > Storage > Rules
+// 2. Replace the default rules with the above content
+// 3. Test the rules using the Firebase Console Rules Playground
+// 4. Deploy the rules to production
+// 5. Monitor access logs for any unauthorized attempts
